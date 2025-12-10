@@ -193,3 +193,21 @@ INSERT INTO Archive (user_id, movie_id, date_added, watching_status) VALUES
 (5, 2, '2025-01-11', 'finished'),
 (5, 9, '2025-01-16', 'watching'),
 (5, 10, '2025-01-19', 'not started');
+DELIMITER $$
+
+CREATE PROCEDURE GetMovieRatings(IN movieID INT)
+BEGIN
+    SELECT 
+        r.rating_id,
+        u.user_name,
+        u.user_surname,
+        r.score,
+        r.comment,
+        r.spoiler
+    FROM Ratings r
+    JOIN Users u ON r.user_id = u.user_id
+    WHERE r.movie_id = movieID;
+END$$
+
+DELIMITER ;
+
