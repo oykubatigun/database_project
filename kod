@@ -211,3 +211,183 @@ END$$
 
 DELIMITER ;
 
+DELIMITER $$
+
+CREATE PROCEDURE GetTopRatedMovies(IN min_avg_score DECIMAL(4,2))
+BEGIN
+    SELECT 
+        m.movie_id,
+        m.name,
+        g.genre_name,
+        AVG(r.score) AS avg_score,
+        COUNT(r.rating_id) AS rating_count
+    FROM Movies m
+    JOIN Ratings r ON m.movie_id = r.movie_id
+    LEFT JOIN Genres g ON m.genre_id = g.genre_id
+    GROUP BY m.movie_id, m.name, g.genre_name
+    HAVING AVG(r.score) >= min_avg_score
+    ORDER BY avg_score DESC, rating_count DESC;
+END$$
+
+DELIMITER ;
+DELIMITER $$
+
+CREATE FUNCTION GetAverageScoreForMovie(p_movie_id INT)
+RETURNS DECIMAL(4,2)
+DETERMINISTIC
+BEGIN
+    DECLARE avg_score DECIMAL(4,2);
+    
+    SELECT AVG(score)
+    INTO avg_score
+    FROM Ratings
+    WHERE movie_id = p_movie_id;
+    
+    RETURN IFNULL(avg_score, 0);
+END$$
+
+DELIMITER ;
+#cagırmak icin kullNILn kısım
+SELECT 
+    m.movie_id,
+    m.name,
+    GetAverageScoreForMovie(m.movie_id) AS avg_score
+FROM Movies m;
+DELIMITER $$
+
+CREATE FUNCTION GetUserTotalRatings(p_user_id INT)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    DECLARE cnt INT;
+    
+    SELECT COUNT(*)
+    INTO cnt
+    FROM Ratings
+    WHERE user_id = p_user_id;
+    
+    RETURN IFNULL(cnt, 0);
+END$$
+
+DELIMITER ;
+CREATE OR REPLACE VIEW v_movie_average_ratings AS
+SELECT
+    m.movie_id,
+    m.name AS movie_name,
+    g.genre_name,
+    AVG(r.score) AS avg_score,
+    COUNT(r.rating_id) AS rating_count
+FROM Movies m
+LEFT JOIN Genres g ON m.genre_id = g.genre_id
+LEFT JOIN Ratings r ON m.movie_id = r.movie_id
+GROUP BY m.movie_id, m.name, g.genre_name;
+CREATE OR REPLACE VIEW v_user_archive_status AS
+SELECT
+    u.user_id,
+    u.user_name,
+    u.user_surname,
+    COUNT(a.archive_id) AS total_archived,
+    SUM(CASE WHEN a.watching_status = 'finished' THEN 1 ELSE 0 END) AS finished_count,
+    SUM(CASE WHEN a.watching_status = 'watching' THEN 1 ELSE 0 END) AS watching_count,
+    SUM(CASE WHEN a.watching_status = 'not started' THEN 1 ELSE 0 END) AS not_started_count
+FROM Users u
+LEFT JOIN Archive a ON u.user_id = a.user_id
+GROUP BY u.user_id, u.user_name, u.user_surname;
+CREATE TABLE Activity_Log (
+    log_id INT AUTO_INCREMENT PRIMARY KEY,
+    log_type VARCHAR(50),
+    user_id INT,
+    movie_id INT,
+    action_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    details TEXT
+);
+DELIMITER $$
+
+CREATE TRIGGER trg_after_rating_insert
+AFTER INSERT ON Ratings
+FOR EACH ROW
+BEGIN
+    INSERT INTO Activity_Log (log_type, user_id, movie_id, details)
+    VALUES (
+        'new_rating',
+        NEW.user_id,
+        NEW.movie_id,
+        CONCAT('Score: ', NEW.score, ', Spoiler: ', NEW.spoiler)
+    );
+END$$
+
+DELIMITER ;
+DELIMITER $$
+
+CREATE TRIGGER trg_after_archive_insert
+AFTER INSERT ON Archive
+FOR EACH ROW
+BEGIN
+    INSERT INTO Activity_Log (log_type, user_id, movie_id, details)
+    VALUES (
+        'archive_added',
+        NEW.user_id,
+        NEW.movie_id,
+        CONCAT('Status: ', NEW.watching_status, ', Date: ', NEW.date_added)
+    );
+END$$
+
+DELIMITER ;
+START TRANSACTION;
+
+INSERT INTO Ratings (user_id, movie_id, score, comment, spoiler)
+VALUES (1, 1, 9, 'Great movie, saved to my archive as well.', FALSE);
+
+INSERT INTO Archive (user_id, movie_id, date_added, watching_status)
+VALUES (1, 1, CURDATE(), 'watching');
+
+COMMIT;
+START TRANSACTION;
+
+-- Önce mevcut durumu kontrol et
+SELECT * FROM Management WHERE user_id = 2;
+
+-- Kullanıcıyı admin yapalım (deneme amaçlı)
+UPDATE Management
+SET admins = TRUE, change_users = TRUE
+WHERE user_id = 2;
+
+-- Yeni hali görün (screen shot için)
+SELECT * FROM Management WHERE user_id = 2;
+
+-- Son anda vazgeçiyoruz
+ROLLBACK;
+
+-- Rollback sonrası son hali tekrar kontrol
+SELECT * FROM Management WHERE user_id = 2;
+SELECT
+    m.movie_id,
+    m.name AS movie_name,
+    COUNT(r.rating_id) AS rating_count,
+    AVG(r.score) AS avg_score
+FROM Movies m
+JOIN Ratings r ON m.movie_id = r.movie_id
+GROUP BY m.movie_id, m.name
+HAVING COUNT(r.rating_id) >= 2
+ORDER BY rating_count DESC, avg_score DESC;
+SELECT
+    u.user_name,
+    u.user_surname,
+    m.name AS movie_name,
+    a.date_added,
+    a.watching_status
+FROM Archive a
+JOIN Users u ON a.user_id = u.user_id
+JOIN Movies m ON a.movie_id = m.movie_id
+WHERE a.watching_status = 'finished';
+SELECT 
+    m.movie_id,
+    m.name,
+    AVG(r.score) AS avg_score
+FROM Movies m
+JOIN Ratings r ON m.movie_id = r.movie_id
+GROUP BY m.movie_id, m.name
+HAVING AVG(r.score) >
+(
+    SELECT AVG(score) FROM Ratings
+);
